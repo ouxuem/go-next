@@ -1,0 +1,16 @@
+version: v2
+plugins:
+  # Backend Go generation
+  - local: protoc-gen-go
+    out: backend/gen
+    opt: paths=source_relative
+  - local: protoc-gen-connect-go
+    out: backend/gen
+    opt: paths=source_relative
+  # Frontend TypeScript generation
+  - remote: buf.build/bufbuild/es:v2.2.5
+    out: frontend/src/gen
+    opt: target=ts
+  - remote: buf.build/connectrpc/query-es:v2.0.1
+    out: frontend/src/gen
+    opt: target=ts

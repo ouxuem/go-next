@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package calculator.v1;
+
+// 指定 Go 包的路径和名称
+option go_package = "go-next/gen/calculator/v1;calculatorv1";
+
+// 定义支持的运算类型
+enum Operation {
+  OPERATION_UNSPECIFIED = 0; // 默认值，不应显式使用
+  OPERATION_ADD = 1;         // 加法
+  OPERATION_SUBTRACT = 2;    // 减法
+  OPERATION_MULTIPLY = 3;    // 乘法
+  OPERATION_DIVIDE = 4;        // 除法
+}
+
+// 运算请求消息
+message OperateRequest {
+  double operand_a = 1; // 第一个操作数 (使用 double 支持小数)
+  double operand_b = 2; // 第二个操作数
+  Operation operation = 3; // 要执行的运算类型
+}
+
+// 运算响应消息
+message OperateResponse {
+  double result = 1; // 运算结果
+}
+
+// 计算器服务定义
+service CalculatorService {
+  // 执行指定的算术运算
+  rpc Operate(OperateRequest) returns (OperateResponse) {}
+} 
