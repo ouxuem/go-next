@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	// "errors" // 移除未使用的 errors 包
 	"fmt"
 	"log"
 	"net/http"
@@ -15,30 +14,10 @@ import (
 
 	calculatorv1 "go-next/gen/calculator/v1"
 	"go-next/gen/calculator/v1/calculatorv1connect"
-	greetv1 "go-next/gen/greet/v1"        // 生成的 greet 包
-	"go-next/gen/greet/v1/greetv1connect" // 生成的 connect 包
 )
 
 // GreetServer 实现 greetv1connect.GreetServiceHandler 接口
 type GreetServer struct{}
-
-// Greet 实现 Greet 方法
-func (s *GreetServer) Greet(
-	ctx context.Context,
-	req *connect.Request[greetv1.GreetRequest],
-) (*connect.Response[greetv1.GreetResponse], error) {
-	log.Printf("Request headers: %v", req.Header())
-	log.Printf("Received request: Name=%s, Age=%d", req.Msg.Name, req.Msg.Age)
-
-	// 在问候语中加入年龄信息
-	greeting := fmt.Sprintf("你好, %s (%d岁)!", req.Msg.Name, req.Msg.Age)
-	res := connect.NewResponse(&greetv1.GreetResponse{
-		Greeting: greeting,
-		Age:      req.Msg.Age, // 在响应中返回年龄
-	})
-	res.Header().Set("Greet-Version", "v1")
-	return res, nil
-}
 
 // CalculatorServer 实现 calculatorv1connect.CalculatorServiceHandler 接口
 type CalculatorServer struct{}
@@ -84,13 +63,12 @@ func (s *CalculatorServer) Operate(
 }
 
 func main() {
-	greeter := &GreetServer{}
 	calculator := &CalculatorServer{} // 创建 CalculatorServer 实例
 	mux := chi.NewRouter()
 
 	// 配置 CORS 中间件
 	corsMiddleware := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3003"}, // 允许的前端源
+		AllowedOrigins:   []string{"http://localhost:3001"}, // 允许的前端源
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Connect-Protocol-Version"},
 		ExposedHeaders:   []string{"Link"},
@@ -98,11 +76,6 @@ func main() {
 		MaxAge:           300, // Maximum value not ignored by any of major browsers
 	})
 	mux.Use(corsMiddleware.Handler) // 应用 CORS 中间件
-
-	// 注册 GreetService 处理器
-	greetPath, greetHandler := greetv1connect.NewGreetServiceHandler(greeter)
-	mux.Handle(greetPath+"*", greetHandler)
-
 	// 注册 CalculatorService 处理器
 	calcPath, calcHandler := calculatorv1connect.NewCalculatorServiceHandler(calculator)
 	mux.Handle(calcPath+"*", calcHandler)

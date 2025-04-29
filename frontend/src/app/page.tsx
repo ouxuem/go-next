@@ -1,121 +1,221 @@
 'use client'
 
-import Image from "next/image";
 import { useState } from 'react'
-import { useQuery } from '@connectrpc/connect-query'
-import { greet } from '@/gen/greet/v1/greet-GreetService_connectquery'
+import { useMutation } from '@connectrpc/connect-query'
+import { operate } from '@/gen/calculator/v1/calculator-CalculatorService_connectquery'
+import { Operation } from '@/gen/calculator/v1/calculator_pb'
 
-export default function Home() {
-  const [name, setName] = useState('')
-  const [age, setAge] = useState<number | undefined>(undefined)
+export default function CalculatorPage() {
+  const [displayValue, setDisplayValue] = useState('0')
+  const [firstOperand, setFirstOperand] = useState<number | null>(null)
+  const [operator, setOperator] = useState<Operation | null>(null)
+  // 这个状态决定下一次数字输入是否应清除显示
+  const [shouldClearDisplay, setShouldClearDisplay] = useState(false)
+  const [lastOperationWasEquals, setLastOperationWasEquals] = useState(false);
 
-  const { data, isLoading, error, refetch } = useQuery(
-    // 直接使用导入的 greet 方法
-    greet,
-    // 如果 name 或 age 为空，则禁用查询
-    name === '' || age === undefined ? undefined : { name, age: age ?? 0 },
-    {
-      enabled: false, // 初始禁用，点击按钮时手动触发
+  const { mutate, isPending, error } = useMutation(operate, {
+    onSuccess: (res) => {
+      // 默认的 onSuccess：通常在 '=' 之后或中间计算完成时调用
+      setDisplayValue(String(res.result))
+
+      // 如果刚刚成功的操作是由 '=' 触发的，则完全重置
+      if (lastOperationWasEquals) {
+          setFirstOperand(null)
+          setOperator(null)
+          setShouldClearDisplay(true) // 准备进行全新的计算
+          setLastOperationWasEquals(false); // 重置标志
+      } else {
+          // 如果是中间计算（由另一个运算符触发）
+          // 结果成为 *下一次* 操作的第一个操作数
+          setFirstOperand(res.result)
+          // 操作符状态已由 performOperation 设置
+          setShouldClearDisplay(true) // 准备接收 *下一次* 操作的第二个操作数
+      }
     },
-  )
+    onError: () => {
+      setDisplayValue('Error')
+      setFirstOperand(null)
+      setOperator(null)
+      setShouldClearDisplay(true)
+      setLastOperationWasEquals(false);
+    },
+  })
 
-  const handleGreet = () => {
-    if (name && age !== undefined)
-      void refetch() // 手动触发查询
+  const inputDigit = (digit: string) => {
+    if (displayValue === 'Error' || shouldClearDisplay) {
+      setDisplayValue(digit)
+      setShouldClearDisplay(false)
+    } else {
+      setDisplayValue(displayValue === '0' ? digit : displayValue + digit)
+    }
+    setLastOperationWasEquals(false); // 输入数字总是会中断连续按 '=' 的可能性
   }
 
+  const inputDecimal = () => {
+    setLastOperationWasEquals(false);
+    if (shouldClearDisplay) {
+      setDisplayValue('0.')
+      setShouldClearDisplay(false)
+      return
+    }
+    if (!displayValue.includes('.')) {
+      setDisplayValue(displayValue + '.')
+    }
+  }
+
+  const clearAll = () => {
+    setDisplayValue('0')
+    setFirstOperand(null)
+    setOperator(null)
+    setShouldClearDisplay(false)
+    setLastOperationWasEquals(false);
+  }
+
+  const backspace = () => {
+    if (shouldClearDisplay || displayValue === 'Error' || displayValue.length === 1) {
+      setDisplayValue('0')
+      setShouldClearDisplay(false) // 允许立即输入
+    } else {
+      setDisplayValue(displayValue.slice(0, -1))
+    }
+     setLastOperationWasEquals(false);
+  }
+
+  const toggleSign = () => {
+     setLastOperationWasEquals(false);
+    if (displayValue !== 'Error') {
+        const currentValue = parseFloat(displayValue)
+        if (currentValue !== 0) { // 不要切换 0 的符号
+        setDisplayValue(String(currentValue * -1))
+        }
+    }
+  }
+
+  const performOperation = (nextOperator: Operation) => {
+    const inputValue = parseFloat(displayValue)
+
+    // 如果处于错误状态，则阻止计算
+     if (displayValue === 'Error') return;
+
+    // 处理连续按运算符的情况 (例如 5 * - 3)
+    // 只更新运算符，除非是在按了 '=' 之后
+    if (operator && shouldClearDisplay && !lastOperationWasEquals) {
+      setOperator(nextOperator);
+      return;
+    }
+
+     setLastOperationWasEquals(false); // 按下运算符会重置此标志
+
+    // 如果存在待处理的操作并且我们已经输入了第二个操作数
+    if (operator && firstOperand !== null && !shouldClearDisplay) {
+      mutate({
+        operandA: firstOperand,
+        operandB: inputValue,
+        operation: operator, // 使用现有的运算符进行计算
+      })
+      // onSuccess 将处理把结果设置为 firstOperand
+      // 现在我们设置刚刚按下的 *下一个* 运算符
+       setOperator(nextOperator)
+       // setShouldClearDisplay 由 onSuccess 处理
+    } else {
+      // 这是第一次按下运算符，或在 '=' 之后进行链式操作
+      setFirstOperand(inputValue)
+      setOperator(nextOperator)
+      setShouldClearDisplay(true)
+    }
+  }
+
+  const handleEquals = () => {
+    const inputValue = parseFloat(displayValue)
+
+    // 如果是错误状态或没有足够信息进行计算，则阻止计算
+    if (displayValue === 'Error' || operator === null || firstOperand === null || shouldClearDisplay) {
+        // 如果用户在计算后重复按 '='，则继续显示结果
+        if (!lastOperationWasEquals && !shouldClearDisplay) {
+             // 或者如果按下 '=' 时没有准备好完整的操作，则不执行任何操作
+             return;
+        }
+       return;
+    }
+
+
+    // 在调用 mutate *之前* 设置标志
+    setLastOperationWasEquals(true);
+
+    mutate({
+      operandA: firstOperand,
+      operandB: inputValue,
+      operation: operator,
+    })
+     // 默认的 onSuccess 将处理状态重置，因为 lastOperationWasEquals 为 true
+  }
+
+  // 按钮组件，用于样式一致性
+  const CalculatorButton = ({ onClick, label, className = '' }: { onClick: () => void; label: string; className?: string }) => (
+    <button
+      onClick={onClick}
+      className={`text-xl font-semibold p-4 rounded shadow active:shadow-inner focus:outline-none ${className}`}
+    >
+      {label}
+    </button>
+  )
+
+  // 定义按钮样式
+  const numberStyle = 'bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-black dark:text-white'
+  const operatorStyle = 'bg-yellow-500 hover:bg-yellow-600 text-white'
+  const functionStyle = 'bg-orange-500 hover:bg-orange-600 text-white' // 用于 C, 退格
+  const equalsStyle = 'bg-green-500 hover:bg-green-600 text-white col-span-1' // 等于按钮样式
+
   return (
-    <div className="grid grid-rows-[auto_1fr_auto] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex gap-2 items-center">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="输入你的名字"
-              className="px-4 py-2 border rounded text-black dark:text-white bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600"
-            />
-            <input
-              type="number"
-              value={age ?? ''}
-              onChange={(e) => setAge(e.target.value === '' ? undefined : parseInt(e.target.value, 10) || 0)}
-              placeholder="年龄"
-              className="px-4 py-2 border rounded text-black dark:text-white bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 w-20"
-            />
-            <button
-              onClick={handleGreet}
-              disabled={!name || age === undefined || isLoading}
-              className="px-4 py-2 bg-blue-500 text-white rounded disabled:opacity-50"
-            >
-              {isLoading ? '加载中...' : '发送问候'}
-            </button>
-          </div>
-
-          {error && (
-            <p className="text-red-500">错误: {error.message}</p>
-          )}
-          {data && (
-            <p className="text-lg font-semibold">{data.greeting}</p>
-          )}
+    <div className="flex justify-center items-center min-h-screen bg-gray-100 dark:bg-gray-900">
+      <div className="w-full max-w-xs bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4">
+        {/* 显示屏 */}
+        <div className="bg-gray-100 dark:bg-gray-700 rounded p-4 mb-4 text-right overflow-hidden">
+          <span className="block text-3xl font-mono text-black dark:text-white break-all">{displayValue}</span>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        {/* 按钮网格 */}
+        <div className="grid grid-cols-4 gap-2">
+          {/* 行 1: C, 退格, +/-, / */}
+          <CalculatorButton onClick={clearAll} label="C" className={functionStyle + " col-span-1"} />
+          <CalculatorButton onClick={backspace} label="退格" className={functionStyle + " col-span-1"} />
+          <CalculatorButton onClick={toggleSign} label="+/-" className={numberStyle} />
+          <CalculatorButton onClick={() => performOperation(Operation.DIVIDE)} label="÷" className={operatorStyle} />
+
+          {/* 行 2: 7, 8, 9, * */}
+          <CalculatorButton onClick={() => inputDigit('7')} label="7" className={numberStyle} />
+          <CalculatorButton onClick={() => inputDigit('8')} label="8" className={numberStyle} />
+          <CalculatorButton onClick={() => inputDigit('9')} label="9" className={numberStyle} />
+          <CalculatorButton onClick={() => performOperation(Operation.MULTIPLY)} label="x" className={operatorStyle} />
+
+          {/* 行 3: 4, 5, 6, - */}
+          <CalculatorButton onClick={() => inputDigit('4')} label="4" className={numberStyle} />
+          <CalculatorButton onClick={() => inputDigit('5')} label="5" className={numberStyle} />
+          <CalculatorButton onClick={() => inputDigit('6')} label="6" className={numberStyle} />
+          <CalculatorButton onClick={() => performOperation(Operation.SUBTRACT)} label="-" className={operatorStyle} />
+
+          {/* 行 4: 1, 2, 3, + */}
+          <CalculatorButton onClick={() => inputDigit('1')} label="1" className={numberStyle} />
+          <CalculatorButton onClick={() => inputDigit('2')} label="2" className={numberStyle} />
+          <CalculatorButton onClick={() => inputDigit('3')} label="3" className={numberStyle} />
+          <CalculatorButton onClick={() => performOperation(Operation.ADD)} label="+" className={operatorStyle} />
+
+          {/* 行 5: 0, ., = */}
+          <CalculatorButton onClick={() => inputDigit('0')} label="0" className={numberStyle + " col-span-2"} />
+          <CalculatorButton onClick={inputDecimal} label="." className={numberStyle} />
+          <CalculatorButton onClick={handleEquals} label="=" className={equalsStyle} />
+
+        </div>
+        {/* 状态消息容器，具有固定高度以防止抖动 */}
+        <div className="h-6 mt-2 text-center text-xs"> {/* 调整 h-6 (1.5rem) 如果需要 */}
+            {isPending && (
+            <p className="text-blue-500">Calculating...</p>
+            )}
+            {error && (
+            <p className="text-red-500">API Error: {error.message}</p>
+            )}
+        </div>
+      </div>
     </div>
-  );
-}
+  )
+} 
